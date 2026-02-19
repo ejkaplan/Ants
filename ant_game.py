@@ -10,7 +10,7 @@ import numpy.typing as npt
 import pygame
 import pygame.locals
 from tqdm import trange
-from board import Board, Entity, generate_board, toroidal_distance_2
+from board import Board, Entity, cells_at_distance, generate_board
 from dataclasses import dataclass
 
 from random_player import RandomBot
@@ -198,7 +198,7 @@ def move_ants(board: Board, p1_moves: set[AntMove], p2_moves: set[AntMove]) -> N
         if start != end
         and start in set(zip(*np.where(board.ants == 1)))
         and not board.walls[end]
-        and toroidal_distance_2(start, end, board.shape) <= 1
+        and end in cells_at_distance(1, start, board.shape)
     }
     p2_actions = {
         start: end
@@ -206,7 +206,7 @@ def move_ants(board: Board, p1_moves: set[AntMove], p2_moves: set[AntMove]) -> N
         if start != end
         and start in set(zip(*np.where(board.ants == 2)))
         and not board.walls[end]
-        and toroidal_distance_2(start, end, board.shape) <= 1
+        and end in cells_at_distance(1, start, board.shape)
     }
     p1_origins, p1_destinations = p1_actions.keys(), list(p1_actions.values())
     p2_origins, p2_destinations = p2_actions.keys(), list(p2_actions.values())
@@ -253,27 +253,23 @@ def spawn_ants(
 
 
 def combat(board: Board, battle_radius: int) -> None:
-    br_2 = battle_radius**2
-    p1_ant_damage = {coord: 0.0 for coord in zip(*np.where(board.ants == 1))}
-    p1_ants_in_range = {coord: set() for coord in p1_ant_damage}
-    p2_ant_damage = {coord: 0.0 for coord in zip(*np.where(board.ants == 2))}
-    p2_ants_in_range = {coord: set() for coord in p2_ant_damage}
-    for ant_1, range_1 in p1_ants_in_range.items():
-        for ant_2, range_2 in p2_ants_in_range.items():
-            if toroidal_distance_2(ant_1, ant_2, board.shape) <= br_2:
-                range_1.add(ant_2)
-                range_2.add(ant_1)
-    for ant_1, range_1 in p1_ants_in_range.items():
-        if not range_1:
+    p1_ants = set(zip(*np.where(board.ants == 1)))
+    p2_ants = set(zip(*np.where(board.ants == 2)))
+    p1_ant_damage = {ant: 0.0 for ant in p1_ants}
+    p2_ant_damage = {ant: 0.0 for ant in p2_ants}
+    for ant in p1_ants:
+        enemies = cells_at_distance(battle_radius, ant, board.shape) & p2_ants
+        if not enemies:
             continue
-        damage = 1 / len(range_1)
-        for enemy in range_1:
+        damage = 1 / len(enemies)
+        for enemy in enemies:
             p2_ant_damage[enemy] += damage
-    for ant_2, range_2 in p2_ants_in_range.items():
-        if not range_2:
+    for ant in p2_ants:
+        enemies = cells_at_distance(battle_radius, ant, board.shape) & p1_ants
+        if not enemies:
             continue
-        damage = 1 / len(range_2)
-        for enemy in range_2:
+        damage = 1 / len(enemies)
+        for enemy in enemies:
             p1_ant_damage[enemy] += damage
     for ant in {a for a in p1_ant_damage if p1_ant_damage[a] >= 1} | {
         a for a in p2_ant_damage if p2_ant_damage[a] >= 1
@@ -288,22 +284,19 @@ def flatten_hills(board: Board) -> None:
 
 
 def harvest(board: Board, collect_radius: int, food: dict[int, int]) -> None:
-    cr_2 = collect_radius**2
     all_ants: set[tuple[int, int]] = set(zip(*np.where(board.ants != 0)))
-    for f in zip(*np.where(board.food)):
-        ants = {
-            board.ants[a]
-            for a in all_ants
-            if toroidal_distance_2(a, f, board.shape) <= cr_2
-        }
-        if len(ants) >= 1:
+    all_food = set(zip(*np.where(board.food)))
+    for f in all_food:
+        ants = cells_at_distance(collect_radius, f, board.shape) & all_ants
+        ant_colors = {board.ants[ant] for ant in ants}
+        if len(ant_colors) >= 1:
             board.food[f] = 0
-        if len(ants) == 1:
-            food[ants.pop()] += 1
+        if len(ant_colors) == 1:
+            food[ant_colors.pop()] += 1
 
 
 def main():
-    b = generate_board(80, 80, hills_per_player=3)
+    b = generate_board(50, 50, hills_per_player=3)
     spec = GameSpecification(b)
     play_game(spec, RandomBot, RandomBot)
 

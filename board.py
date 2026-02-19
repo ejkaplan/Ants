@@ -40,33 +40,18 @@ class Board:
         shuffle(self.food_spawn_order)
         self.food_spawn_index = 0
 
-    def can_see(
-        self,
-        locations: Iterable[tuple[int, int]],
-        vision_range_2: int,
-        target: tuple[int, int],
-    ):
-        for loc in locations:
-            if toroidal_distance_2(target, loc, self.shape) <= vision_range_2:
-                return True
-        return False
-
     def get_vision(
         self, player: int, vision_range: int
     ) -> set[tuple[tuple[int, int], Entity]]:
-        vis_2 = vision_range**2
         ant_locs = set(zip(*np.where(self.ants == player)))
         hill_locs = set(zip(*np.where(self.hills == player)))
         my_locs = ant_locs | hill_locs
-        food_locs = {
-            loc
-            for loc in zip(*np.where(self.food))
-            if self.can_see(my_locs, vis_2, loc)
-        }
+        my_vision = set.union(
+            *(cells_at_distance(vision_range, ant, self.shape) for ant in my_locs)
+        )
+        food_locs = {loc for loc in zip(*np.where(self.food)) if loc in my_vision}
         enemy_locs = {
-            loc
-            for loc in zip(*np.where(self.ants == 3 - player))
-            if self.can_see(my_locs, vis_2, loc)
+            loc for loc in zip(*np.where(self.ants == 3 - player)) if loc in my_vision
         }
         enemy_hill_locs = set(zip(*np.where(self.ants == 3 - player)))
         return (
@@ -171,8 +156,7 @@ def neighbors(
         yield (loc[0] + dr) % shape[0], (loc[1] + dc) % shape[1]
 
 
-@cache
-def toroidal_distance_2(
+def toroidal_distance(
     a: tuple[int, int], b: tuple[int, int], shape: tuple[int, int]
 ) -> float:
     dr = abs(a[0] - b[0])
@@ -181,7 +165,26 @@ def toroidal_distance_2(
         dr = shape[0] - dr
     if dc > 0.5 * shape[1]:
         dc = shape[1] - dc
-    return dr**2 + dc**2
+    return np.sqrt(dr**2 + dc**2)
+
+
+@cache
+def _cells_at_distance(dist: float) -> npt.NDArray[np.int_]:
+    possible = list(product(range(-int(dist), int(dist) + 1), repeat=2))
+    possible = [c for c in possible if np.linalg.norm(c) <= dist]
+    return np.array(possible)
+
+
+def cells_at_distance(
+    dist: float, coord: tuple[int, int], shape: tuple[int, int]
+) -> set[tuple[int, int]]:
+    return {tuple(row) for row in ((_cells_at_distance(dist) + coord) % shape)}
+
+
+def in_range(
+    a: tuple[int, int], b: tuple[int, int], dist: float, shape: tuple[int, int]
+) -> bool:
+    return b in cells_at_distance(dist, a, shape)
 
 
 def _segment(walls: npt.NDArray[np.int_]) -> npt.NDArray[np.int_]:
@@ -247,7 +250,7 @@ def _spawn_hills(
     rng: np.random.Generator,
     walls: npt.NDArray[np.int_],
 ):
-    min_dist_2 = (hill_dist * max(rows, cols)) ** 2
+    min_dist = hill_dist * max(rows, cols)
     while True:
         hills = np.zeros((rows, cols)).astype(int)
         open_cells = list(zip(*np.where(walls == 0)))
@@ -260,8 +263,7 @@ def _spawn_hills(
         hill_locations = zip(*np.where(hills != 0))
         good = True
         for a, b in combinations(hill_locations, 2):
-            d2 = toroidal_distance_2(a, b, (rows, cols))
-            if d2 < min_dist_2:
+            if in_range(a, b, min_dist, (rows, cols)):
                 good = False
                 break
         if good:
