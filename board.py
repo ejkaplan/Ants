@@ -156,7 +156,7 @@ def neighbors(
         yield (loc[0] + dr) % shape[0], (loc[1] + dc) % shape[1]
 
 
-def toroidal_distance(
+def toroidal_distance_2(
     a: tuple[int, int], b: tuple[int, int], shape: tuple[int, int]
 ) -> float:
     dr = abs(a[0] - b[0])
@@ -165,7 +165,7 @@ def toroidal_distance(
         dr = shape[0] - dr
     if dc > 0.5 * shape[1]:
         dc = shape[1] - dc
-    return np.sqrt(dr**2 + dc**2)
+    return dr**2 + dc**2
 
 
 @cache
